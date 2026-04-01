@@ -2,6 +2,9 @@
 
 use super::TaskContext;
 
+/// 5
+pub const MAX_SYSCALL_NUM: usize = 500;
+
 /// The task control block (TCB) of a task.
 #[derive(Copy, Clone)]
 pub struct TaskControlBlock {
@@ -9,6 +12,8 @@ pub struct TaskControlBlock {
     pub task_status: TaskStatus,
     /// The task context
     pub task_cx: TaskContext,
+    /// 6
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
 }
 
 /// The status of a task
