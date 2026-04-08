@@ -1,5 +1,11 @@
 //! Process management syscalls
-use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next};
+use crate::task::{
+    change_program_brk, current_get_syscall_times, current_user_token, exit_current_and_run_next,
+    suspend_current_and_run_next,
+};
+
+use crate::mm::{copy_from_user, copy_to_user};
+use crate::timer::get_time_us;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -27,14 +33,47 @@ pub fn sys_yield() -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+
+    let us = get_time_us();
+    let timeval = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+
+    let result = copy_to_user(current_user_token(), _ts, &timeval);
+
+    if result {
+        0
+    } else {
+        -1
+    }
 }
 
 /// TODO: Finish sys_trace to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
     trace!("kernel: sys_trace");
-    -1
+    match _trace_request {
+        0 => {
+            let mut val: isize = 0;
+            if copy_from_user(current_user_token(), _id as *const isize, &mut val) {
+                val
+            } else {
+                -1
+            }
+        }
+        1 => {
+            let data_u8 = _data as u8;
+            let result = copy_to_user(current_user_token(), _id as *mut u8, &data_u8);
+            if result {
+                0
+            } else {
+                -1
+            }
+        }
+        2 => current_get_syscall_times(_id) as isize,
+        _ => -1,
+    }
 }
 
 // YOUR JOB: Implement mmap.
