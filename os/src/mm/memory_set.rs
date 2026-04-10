@@ -57,11 +57,11 @@ impl MemorySet {
         start_va: VirtAddr,
         end_va: VirtAddr,
         permission: MapPermission,
+        is_mmap: bool,
     ) {
-        self.push(
-            MapArea::new(start_va, end_va, MapType::Framed, permission),
-            None,
-        );
+        let mut map_area = MapArea::new(start_va, end_va, MapType::Framed, permission);
+        map_area.is_mmap = is_mmap;
+        self.push(map_area, None);
     }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
@@ -262,6 +262,30 @@ impl MemorySet {
             false
         }
     }
+
+    pub fn check_any_valid(&self, start: VirtAddr, end: VirtAddr) -> bool {
+        let range = VPNRange::new(start.floor(), end.ceil());
+        range
+            .into_iter()
+            .any(|vpn| self.page_table.check_valid(vpn))
+    }
+
+    pub fn remove_mmap_area(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
+        let start_vpn = start.floor();
+        let end_vpn = end.ceil();
+
+        if let Some(pos) = self.areas.iter().position(|area| {
+            area.vpn_range.get_start() == start_vpn
+                && area.vpn_range.get_end() == end_vpn
+                && area.is_mmap
+        }) {
+            let mut area = self.areas.remove(pos);
+            area.unmap(&mut self.page_table);
+            true
+        } else {
+            false
+        }
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
@@ -269,6 +293,7 @@ pub struct MapArea {
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     map_type: MapType,
     map_perm: MapPermission,
+    is_mmap: bool,
 }
 
 impl MapArea {
@@ -285,6 +310,7 @@ impl MapArea {
             data_frames: BTreeMap::new(),
             map_type,
             map_perm,
+            is_mmap: false,
         }
     }
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {

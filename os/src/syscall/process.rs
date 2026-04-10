@@ -1,10 +1,11 @@
 //! Process management syscalls
+use crate::config::PAGE_SIZE;
 use crate::task::{
     change_program_brk, current_get_syscall_times, current_user_token, exit_current_and_run_next,
-    suspend_current_and_run_next,
+    suspend_current_and_run_next, with_current_task, with_current_task_mut,
 };
 
-use crate::mm::{copy_from_user, copy_to_user};
+use crate::mm::{copy_from_user, copy_to_user, MapPermission, VirtAddr};
 use crate::timer::get_time_us;
 
 #[repr(C)]
@@ -76,16 +77,69 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
     }
 }
 
+bitflags! {
+    pub struct ProtFlags: usize {
+        const READ = 0x1;
+        const WRITE = 0x2;
+        const EXEC = 0x4;
+    }
+}
+
+impl MapPermission {
+    /// from prot to MapPerssion
+    pub fn from_prot(prot: usize) -> Option<Self> {
+        if prot & !0x7 != 0 {
+            return None;
+        }
+        if prot & 0x7 == 0 {
+            return None;
+        }
+        Self::from_bits((prot as u8) << 1)
+    }
+}
+
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(_start: usize, _len: usize, _prot: usize) -> isize {
+    let Some(permission) = MapPermission::from_prot(_prot) else {
+        return -1;
+    };
+
+    if _start & (PAGE_SIZE - 1) != 0 {
+        return -1;
+    }
+
+    let start: VirtAddr = _start.into();
+    let end: VirtAddr = (_start + _len).into();
+
+    let is_any_valid = with_current_task(|tcb| tcb.memory_set.check_any_valid(start, end));
+
+    if is_any_valid {
+        return -1;
+    }
+
+    with_current_task_mut(|tcb| {
+        tcb.memory_set
+            .insert_framed_area(start, end, permission | MapPermission::U, true);
+    });
+    0
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+    if _start & (PAGE_SIZE - 1) != 0 {
+        return -1;
+    }
+
+    let start: VirtAddr = _start.into();
+    let end: VirtAddr = (_start + _len).into();
+
+    let result = with_current_task_mut(|tcb| tcb.memory_set.remove_mmap_area(start, end));
+
+    if result {
+        0
+    } else {
+        -1
+    }
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

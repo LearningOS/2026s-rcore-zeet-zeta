@@ -215,3 +215,20 @@ pub fn current_get_syscall_times(syscall_id: usize) -> usize {
     let inner = TASK_MANAGER.inner.exclusive_access();
     inner.tasks[inner.current_task].get_syscall_times(syscall_id)
 }
+
+pub fn with_current_task<F, R>(f: F) -> R
+where
+    F: FnOnce(&TaskControlBlock) -> R,
+{
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    f(&inner.tasks[inner.current_task])
+}
+
+pub fn with_current_task_mut<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut TaskControlBlock) -> R,
+{
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let cur = inner.current_task;
+    f(&mut (inner.tasks[cur]))
+}
