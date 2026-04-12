@@ -6,7 +6,7 @@ use crate::{
     mm::{copy_to_user, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        suspend_current_and_run_next, with_current_task,
     },
     timer::get_time_us,
 };
@@ -128,22 +128,16 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     }
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_mmap(_start: usize, _len: usize, _prot: usize) -> isize {
+    with_current_task(|tcb| {
+        tcb.inner_exclusive_access()
+            .memory_set
+            .mmap(_start, _len, _prot)
+    })
 }
 
-/// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    with_current_task(|tcb| tcb.inner_exclusive_access().memory_set.munmap(_start, _len))
 }
 
 /// change data segment size
