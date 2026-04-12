@@ -318,6 +318,64 @@ impl MemorySet {
             false
         }
     }
+
+    pub fn check_any_valid(&self, start: VirtAddr, end: VirtAddr) -> bool {
+        let range = VPNRange::new(start.floor(), end.ceil());
+        range
+            .into_iter()
+            .any(|vpn| self.page_table.check_valid(vpn))
+    }
+
+    pub fn mmap(&mut self, _start: usize, _len: usize, _prot: usize) -> isize {
+        let Some(permission) = MapPermission::from_prot(_prot) else {
+            return -1;
+        };
+
+        let start: VirtAddr = _start.into();
+        let end: VirtAddr = (_start + _len).into();
+        if !start.aligned() {
+            return -1;
+        }
+
+        if self.check_any_valid(start, end) {
+            return -1;
+        }
+
+        self.insert_framed_area(start, end, permission | MapPermission::U);
+        0
+    }
+
+    pub fn munmap(&mut self, _start: usize, _len: usize) -> isize {
+        let start: VirtAddr = _start.into();
+        let end: VirtAddr = (_start + _len).into();
+        if !start.aligned() {
+            return -1;
+        }
+
+        let start_vpn = start.floor();
+        let end_vpn = end.ceil();
+
+        if let Some(pos) = self.areas.iter().position(|area| {
+            area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn
+        }) {
+            let mut area = self.areas.remove(pos);
+            area.unmap(&mut self.page_table);
+            0
+        } else {
+            -1
+        }
+    }
+}
+impl MapPermission {
+    pub fn from_prot(prot: usize) -> Option<Self> {
+        if prot & !0x7 != 0 {
+            return None;
+        }
+        if prot & 0x7 == 0 {
+            return None;
+        }
+        Self::from_bits((prot as u8) << 1)
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

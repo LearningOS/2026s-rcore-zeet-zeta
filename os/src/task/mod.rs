@@ -120,3 +120,10 @@ lazy_static! {
 pub fn add_initproc() {
     add_task(INITPROC.clone());
 }
+
+pub fn with_current_task<F, R>(f: F) -> R
+where
+    F: FnOnce(Arc<TaskControlBlock>) -> R,
+{
+    f(current_task().unwrap())
+}
