@@ -159,7 +159,12 @@ impl PageTable {
 }
 
 /// Translate&Copy a ptr[u8] array with LENGTH len to a mutable u8 Vec through page table
-pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
+pub fn translated_byte_buffer(
+    token: usize,
+    ptr: *const u8,
+    len: usize,
+    is_write: bool,
+) -> Option<Vec<&'static mut [u8]>> {
     let page_table = PageTable::from_token(token);
     let mut start = ptr as usize;
     let end = start + len;
@@ -167,7 +172,22 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     while start < end {
         let start_va = VirtAddr::from(start);
         let mut vpn = start_va.floor();
-        let ppn = page_table.translate(vpn).unwrap().ppn();
+        // let ppn = page_table.translate(vpn).unwrap().ppn();
+        let pte = page_table.translate(vpn)?;
+
+        if !pte.is_valid() || !pte.readable() {
+            return None;
+        }
+
+        if !pte.flags().contains(PTEFlags::U) {
+            return None;
+        }
+
+        if is_write && !pte.writable() {
+            return None;
+        }
+
+        let ppn = pte.ppn();
         vpn.step();
         let mut end_va: VirtAddr = vpn.into();
         end_va = end_va.min(VirtAddr::from(end));
@@ -178,7 +198,44 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         }
         start = end_va.into();
     }
-    v
+    Some(v)
+}
+
+pub fn copy_to_user<T>(token: usize, user_ptr: *mut T, data: &T) -> bool {
+    let size = core::mem::size_of::<T>();
+
+    let data_bytes: &[u8] =
+        unsafe { core::slice::from_raw_parts(data as *const _ as *const u8, size) };
+
+    if let Some(buffers) = translated_byte_buffer(token, user_ptr as *const u8, size, true) {
+        let mut current_offset = 0;
+        for buffer in buffers {
+            let len = buffer.len();
+            buffer.copy_from_slice(&data_bytes[current_offset..current_offset + len]);
+            current_offset += len;
+        }
+        true
+    } else {
+        false
+    }
+}
+
+pub fn copy_from_user<T>(token: usize, user_ptr: *const T, data: &mut T) -> bool {
+    let size = core::mem::size_of::<T>();
+    let data_bytes: &mut [u8] =
+        unsafe { core::slice::from_raw_parts_mut(data as *mut _ as *mut u8, size) };
+
+    if let Some(buffers) = translated_byte_buffer(token, user_ptr as *const u8, size, false) {
+        let mut current_offset = 0;
+        for buffer in buffers {
+            let len = buffer.len();
+            data_bytes[current_offset..current_offset + len].copy_from_slice(buffer);
+            current_offset += len;
+        }
+        true
+    } else {
+        false
+    }
 }
 
 /// Translate&Copy a ptr[u8] array end with `\0` to a `String` Vec through page table
