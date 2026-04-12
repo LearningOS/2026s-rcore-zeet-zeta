@@ -6,7 +6,7 @@ use crate::{
     mm::{copy_to_user, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, with_current_task,
+        suspend_current_and_run_next, with_current_task, TaskControlBlock,
     },
     timer::get_time_us,
 };
@@ -150,14 +150,26 @@ pub fn sys_sbrk(size: i32) -> isize {
     }
 }
 
-/// YOUR JOB: Implement spawn.
-/// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let token = current_user_token();
+    let path = translated_str(token, _path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let new_task = Arc::new(TaskControlBlock::new(data));
+        with_current_task(|tcb| {
+            new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&tcb));
+            let mut inner = tcb.inner_exclusive_access();
+            inner.children.push(new_task.clone());
+        });
+        let new_pid = new_task.pid.0;
+        add_task(new_task);
+        new_pid as isize
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
