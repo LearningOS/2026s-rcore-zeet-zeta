@@ -174,5 +174,14 @@ pub fn sys_set_priority(_prio: isize) -> isize {
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if _prio >= 2 {
+        with_current_task(|tcb| {
+            tcb.inner_exclusive_access()
+                .stride_info
+                .set_priority(_prio as usize);
+        });
+        _prio
+    } else {
+        -1
+    }
 }
