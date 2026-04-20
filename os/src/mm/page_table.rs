@@ -224,6 +224,7 @@ pub fn copy_to_user<T>(token: usize, user_ptr: *mut T, data: &T) -> bool {
     }
 }
 
+#[allow(dead_code)]
 pub fn copy_from_user<T>(token: usize, user_ptr: *const T, data: &mut T) -> bool {
     let size = core::mem::size_of::<T>();
     let data_bytes: &mut [u8] =

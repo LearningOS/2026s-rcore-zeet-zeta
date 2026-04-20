@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 
 use crate::{
     fs::{open_file, OpenFlags},
-    mm::{translated_refmut, translated_str},
+    mm::{copy_to_user, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, with_current_task, TaskControlBlock,
@@ -153,8 +153,9 @@ pub fn sys_spawn(_path: *const u8) -> isize {
     );
     let token = current_user_token();
     let path = translated_str(token, _path);
-    if let Some(data) = get_app_data_by_name(path.as_str()) {
-        let new_task = Arc::new(TaskControlBlock::new(data));
+    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+        let all_data = app_inode.read_all();
+        let new_task = Arc::new(TaskControlBlock::new(all_data.as_slice()));
         with_current_task(|tcb| {
             new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&tcb));
             let mut inner = tcb.inner_exclusive_access();
