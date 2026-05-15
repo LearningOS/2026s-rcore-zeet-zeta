@@ -4,6 +4,7 @@ use super::UPSafeCell;
 use crate::task::TaskControlBlock;
 use crate::task::{block_current_and_run_next, suspend_current_and_run_next};
 use crate::task::{current_task, wakeup_task};
+use alloc::vec::Vec;
 use alloc::{collections::VecDeque, sync::Arc};
 
 /// Mutex trait
@@ -12,6 +13,14 @@ pub trait Mutex: Sync + Send {
     fn lock(&self);
     /// Unlock the mutex
     fn unlock(&self);
+
+    fn get_owner_tid(&self) -> Option<usize> {
+        None
+    }
+
+    fn get_wait_queue_tids(&self) -> Vec<usize> {
+        Vec::new()
+    }
 }
 
 /// Spinlock Mutex struct
@@ -58,8 +67,9 @@ pub struct MutexBlocking {
 }
 
 pub struct MutexBlockingInner {
-    locked: bool,
-    wait_queue: VecDeque<Arc<TaskControlBlock>>,
+    pub locked: bool,
+    pub wait_queue: VecDeque<Arc<TaskControlBlock>>,
+    pub owner: Option<usize>,
 }
 
 impl MutexBlocking {
@@ -71,6 +81,7 @@ impl MutexBlocking {
                 UPSafeCell::new(MutexBlockingInner {
                     locked: false,
                     wait_queue: VecDeque::new(),
+                    owner: None,
                 })
             },
         }
@@ -82,12 +93,15 @@ impl Mutex for MutexBlocking {
     fn lock(&self) {
         trace!("kernel: MutexBlocking::lock");
         let mut mutex_inner = self.inner.exclusive_access();
+        let tid = current_task().unwrap().get_tid();
+
         if mutex_inner.locked {
             mutex_inner.wait_queue.push_back(current_task().unwrap());
             drop(mutex_inner);
             block_current_and_run_next();
         } else {
             mutex_inner.locked = true;
+            mutex_inner.owner = Some(tid);
         }
     }
 
@@ -97,9 +111,25 @@ impl Mutex for MutexBlocking {
         let mut mutex_inner = self.inner.exclusive_access();
         assert!(mutex_inner.locked);
         if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
+            let tid = waking_task.get_tid();
+            mutex_inner.owner = Some(tid);
             wakeup_task(waking_task);
         } else {
             mutex_inner.locked = false;
+            mutex_inner.owner = None;
         }
+    }
+
+    fn get_owner_tid(&self) -> Option<usize> {
+        self.inner.exclusive_access().owner
+    }
+
+    fn get_wait_queue_tids(&self) -> Vec<usize> {
+        self.inner
+            .exclusive_access()
+            .wait_queue
+            .iter()
+            .map(|task| task.get_tid())
+            .collect()
     }
 }
